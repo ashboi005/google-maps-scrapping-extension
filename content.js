@@ -85,7 +85,8 @@
           elapsed += interval;
 
           // Find specific elements that only exist in the detail view
-          const possibleH1s = Array.from(document.querySelectorAll('h1.fontHeadlineLarge, div[role="main"] h1'));
+          // Updated to include hotel-specific class .DUwDvf and others
+          const possibleH1s = Array.from(document.querySelectorAll('h1.fontHeadlineLarge, h1.DUwDvf, h1.kpih0e, h1.uvopNe, div[role="main"] h1'));
           const detailH1 = possibleH1s.find(h1 => {
             const text = h1.textContent.trim();
             // VALIDATION:
@@ -100,8 +101,9 @@
           
           const hasActionButtons = document.querySelector('button[data-item-id]');
           const hasTabs = document.querySelector('div[role="tablist"]');
+          const hasHotelClass = document.querySelector('.DUwDvf'); // Extra check for hotel header existence
 
-          if (detailH1 && (hasActionButtons || hasTabs)) {
+          if (detailH1 && (hasActionButtons || hasTabs || hasHotelClass)) {
             clearInterval(check);
             resolve(true);
           }
@@ -123,7 +125,9 @@
     }
 
     extractName() {
-      const possibleH1s = Array.from(document.querySelectorAll('h1.fontHeadlineLarge, div[role="main"] h1'));
+      // Updated to include hotel-specific class .DUwDvf
+      // Also added .kpih0e and .uvopNe based on specific hotel HTML structure
+      const possibleH1s = Array.from(document.querySelectorAll('h1.fontHeadlineLarge, h1.DUwDvf, h1.kpih0e, h1.uvopNe, div[role="main"] h1'));
       
       // Filter out common UI headers
       const validH1 = possibleH1s.find(h1 => {
@@ -283,16 +287,26 @@
       if (ratingEl) {
         const label = ratingEl.getAttribute('aria-label') || '';
         const match = label.match(/([\d,]+)\s*review/i);
-        return match ? match[1].replace(/,/g, '') : '';
+        if (match) return match[1].replace(/,/g, '');
       }
 
       // Fallback: look for parenthesized number near rating
-      const spans = document.querySelectorAll('span');
+      const spans = Array.from(document.querySelectorAll('span[aria-label*="reviews"]'));
       for (const span of spans) {
+         const label = span.getAttribute('aria-label');
+         const match = label.match(/([\d,]+)\s*reviews/);
+         if (match) return match[1].replace(/,/g, '');
+      }
+      
+      // Fallback 2: look for parenthesized number in text
+      const allSpans = document.querySelectorAll('span');
+      for (const span of allSpans) {
         const text = span.textContent.trim();
         const match = text.match(/^\(?([\d,]+)\)?$/);
-        if (match && parseInt(match[1].replace(/,/g, '')) > 0) {
-          return match[1].replace(/,/g, '');
+        if (match && parseInt(match[1].replace(/,/g, '')) > 0 ) {
+           // Ensure it's not a year or price by checking context if possible
+           // But generally (230) is likely reviews if near rating
+           return match[1].replace(/,/g, '');
         }
       }
 
@@ -303,9 +317,14 @@
       // Category usually appears as a button or span near the name
       const categoryBtn = document.querySelector('button[jsaction*="category"]');
       if (categoryBtn) return categoryBtn.textContent.trim();
+      
+      // Fallback: Hotel star rating sometimes looks like category "5-star hotel"
+      const hotelStars = document.querySelector('span[aria-label*="-star hotel"]');
+      if (hotelStars) return hotelStars.textContent.trim();
 
       // Sometimes shown as a span right after the rating row
-      const infoArea = document.querySelector('div[role="main"]');
+      // We look for the detail panel container if role="main" is missing
+      const infoArea = document.querySelector('div[role="main"]') || document.querySelector('.m6QErb[aria-label]');
       if (infoArea) {
         const spans = infoArea.querySelectorAll('span');
         for (const span of spans) {
@@ -367,7 +386,7 @@
       }
 
       // Small extra wait for any trailing DOM mutations
-      await this.wait(200);
+      await this.wait(500); // Increased wait time for hotel details to populate
 
       // Check if we actually got new data
       const currentName = this.extractName();
@@ -438,16 +457,26 @@
       this.log('Scraping started');
 
       let consecutiveScrollFails = 0;
+      let lastProcessedIndex = 0; // Optimization: Resume from last index
 
       try {
         while (this.isRunning) {
           const cards = this.getCards();
           let newDataThisRound = 0;
 
+          // Safety check: if list shrank (virtualization), reset index
+          if (cards.length < lastProcessedIndex) {
+            lastProcessedIndex = 0;
+          }
+
           this.sendProgress(`Processing ${cards.length} visible cards…`);
 
-          for (let i = 0; i < cards.length; i++) {
+          // Start loop from lastProcessedIndex instead of 0
+          for (let i = lastProcessedIndex; i < cards.length; i++) {
             if (!this.isRunning) break;
+
+            // Mark this index as processed for next time
+            lastProcessedIndex = i + 1;
 
             const card = cards[i];
             const uniqueUrl = this.getUniqueUrl(card.href);
